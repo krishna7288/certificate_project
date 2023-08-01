@@ -15,7 +15,7 @@ app.set('views', __dirname + '/views');
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cors({
-  origin: 'https://whytap.onrender.com/'
+  origin: 'http://localhost:3000'
 }));
 
 
