@@ -14,9 +14,7 @@ app.set('views', __dirname + '/views');
 // app.use(bodyParser.json());
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
-app.use(cors({
-  origin: 'http://localhost:3000'
-}));
+app.use(cors());
 
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
