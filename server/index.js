@@ -6,6 +6,7 @@ const connectDB = require('./model/connection');
 const routes = require('./routes/route');
 const path = require('path');
 
+app.use(cors());
 
 app.set('view engine', 'ejs');
 app.set('views', __dirname + '/views');
@@ -14,7 +15,7 @@ app.set('views', __dirname + '/views');
 // app.use(bodyParser.json());
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
-app.use(cors());
+
 
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));

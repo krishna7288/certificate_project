@@ -2,67 +2,66 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const UserModel = require('../model/user');
-//const puppeteer = require('puppeteer');
-const upload = multer(); // No storage configuration for multer
-const path = require('path');
-const fs = require('fs');
-const { promisify } = require('util');
-//const unlinkAsync = promisify(fs.unlink);
-//const pdf = require('html-pdf'); // Import html-pdf library
 const pdfkit = require('pdfkit');
+const { Readable } = require('stream');
+const dropboxV2Api = require('dropbox-v2-api');
+require('dotenv').config();
 
-
-router.post('/form', upload.none(), async (req, res) => {
-  const {
-    studentName,
-    dob,
-    courseName,
-    duration,
-    mobileNumber,
-    certificateNumber,
-  } = req.body;
-
-  try {
-    const user = new UserModel({
-      student_name: studentName,
-      dob,
-      course_name: courseName,
-      mobile_number: mobileNumber,
-      certificate_number: certificateNumber,
-      duration,
-    });
-
-    await user.save();
-
-    res.send('User created successfully');
-  } catch (error) {
-    console.error('Failed to create user:', error);
-    res.status(500).send('An error occurred');
-  }
+const dropbox = dropboxV2Api.authenticate({
+  token:process.env.DROP
 });
 
-// Route to generate the certificate and save it to the database
+  const upload = multer(); // No storage configuration for multer
+
+  router.post('/form', upload.none(), async (req, res) => {
+    const {
+      studentName,
+      dob,
+      courseName,
+      duration,
+      mobileNumber,
+      certificateNumber,
+    } = req.body;
+
+    try {
+      const user = new UserModel({
+        student_name: studentName,
+        dob,
+        course_name: courseName,
+        mobile_number: mobileNumber,
+        certificate_number: certificateNumber,
+        duration,
+      });
+
+      await user.save();
+
+      res.send('User created successfully');
+    } catch (error) {
+      console.error('Failed to create user:', error);
+      res.status(500).send('An error occurred');
+    }
+  });
+
+
+
+
 router.post('/generate-pdf', async (req, res) => {
-  const { dataURL, studentName,mobileNumber,dob, courseName, duration, certificateNumber } = req.body;
+  const { dataURL, studentName, mobileNumber, dob, courseName, duration, certificateNumber } = req.body;
 
   try {
-    // Convert the data URL (base64 encoded image) to a buffer
     const buffer = Buffer.from(dataURL.split(',')[1], 'base64');
 
-    // Create a PDF document using pdfkit
     const doc = new pdfkit({
-      size: [595.28, 841.89], // You can use custom size, e.g., { width: 800, height: 600 }
-      layout: 'landscape', // Set the orientation to landscape
-      margin: 0, // Set margins to 0 to maximize the content area
+      size: [595.28, 841.89],
+      layout: 'landscape',
+      margin: 0,
       dpi: 1000,
     });
 
-    // Stream the image buffer to the PDF document
     doc.image(buffer, {
-      fit: [doc.page.width, doc.page.height], // Fit the image to the full page
+      fit: [doc.page.width, doc.page.height],
     });
 
-    // Save the PDF to a buffer
     const pdfBuffer = await new Promise((resolve, reject) => {
       const buffers = [];
       doc.on('data', (chunk) => buffers.push(chunk));
@@ -70,20 +69,46 @@ router.post('/generate-pdf', async (req, res) => {
       doc.end();
     });
 
-    // Save the buffer to a file (you can use a unique filename)
-    const fileName = `${studentName}_certificate.pdf`;
-    const filePath = path.join(__dirname, '../uploads', fileName);
-    await fs.promises.writeFile(filePath, pdfBuffer);
+    const timestamp = Date.now(); // Get a unique timestamp
+    const fileName = `${timestamp}_${studentName}_certificate.pdf`; // Include the timestamp in the file name
+
+    const uploadResult = await new Promise((resolve, reject) => {
+      const readableStream = new Readable(); // Create a readable stream
+      readableStream.push(pdfBuffer);
+      readableStream.push(null); // Signal the end of the stream
+
+      dropbox(
+        {
+          resource: 'files/upload',
+          parameters: {
+            path: `/Certificates/${fileName}`, // Use the new file name with timestamp
+          },
+          readStream: readableStream, // Pass the readable stream here
+        },
+        (err, result) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve(result);
+          }
+        }
+      );
+    });
+
+    // Construct the Dropbox shared link URL
+    const sharedLink = `https://www.dropbox.com/s/${uploadResult.id}/${fileName}?dl=1`;
+
     const user = await UserModel.create({
       student_name: studentName,
-      dob:dob,
+      dob,
       course_name: courseName,
       mobile_number: mobileNumber,
       certificate_number: certificateNumber,
       duration,
-      certificate_file: `/download/${fileName}`, // Store the download link in the certificate_file field
+      certificate_file: sharedLink, // Store the shared link URL
     });
-    res.status(200).send({ downloadLink: `/download/${fileName}` });
+
+    res.status(200).send({ downloadLink: sharedLink });
   } catch (error) {
     console.error('Failed to generate the certificate PDF:', error);
     res.status(500).send('An error occurred while generating the certificate PDF.');
@@ -91,7 +116,6 @@ router.post('/generate-pdf', async (req, res) => {
 });
 
 
-//To get the certificate by students
 router.post('/api/certificates', async (req, res) => {
   const { certificateID, dateOfBirth } = req.body;
 
@@ -112,8 +136,6 @@ router.post('/api/certificates', async (req, res) => {
   }
 });
 
-
-// Route to handle certificate download
 router.get('/download/:fileName', async (req, res) => {
   const { fileName } = req.params;
   const filePath = path.join(__dirname, '../uploads', fileName);
@@ -122,7 +144,7 @@ router.get('/download/:fileName', async (req, res) => {
     if (!fs.existsSync(filePath)) {
       return res.status(404).send('File not found');
     }
-    // Stream the PDF file to the client for download
+
     res.setHeader('Content-Type', 'application/pdf');
     fs.createReadStream(filePath).pipe(res);
   } catch (error) {
@@ -131,17 +153,14 @@ router.get('/download/:fileName', async (req, res) => {
   }
 });
 
-//delete functionality
 router.delete('/api/students/:name', async (req, res) => {
   const { name } = req.params;
   try {
-    // Find the student by name and delete from the database
     const deletedStudent = await UserModel.findOneAndDelete({ student_name: name });
     if (!deletedStudent) {
       return res.status(404).send('Student not found');
     }
 
-    // If the student was successfully deleted, remove the associated certificate file (optional)
     if (deletedStudent.certificate_file) {
       const filePath = path.join(__dirname, '../uploads', path.basename(deletedStudent.certificate_file));
       fs.unlinkSync(filePath);
@@ -162,4 +181,5 @@ router.get('/students', async (req, res) => {
     res.status(500).send('An error occurred while fetching students.');
   }
 });
+
 module.exports = router;
